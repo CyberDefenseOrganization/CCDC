@@ -15,10 +15,10 @@ harden_system() {
 set -euo pipefail
 
 echo "Updating system..."
-dnf -y update >/dev/null
+dnf -y update --security || true
 
 echo "Installing EPEL..."
-dnf -y install epel-release >/dev/null
+dnf -y install epel-release >/dev/null || true
 
 echo "Removing dangerous services..."
 dnf -y remove telnet telnet-server nmap-ncat >/dev/null 2>&1 || true
@@ -29,7 +29,6 @@ dnf -y install \
   git \
   curl \
   fail2ban \
-  iptables-services \
   lynis \
   policycoreutils-python-utils >/dev/null
 
@@ -42,10 +41,9 @@ chmod 700 /opt/linpeas/linpeas.sh
 
 # Switch from firewalld to iptables
 echo "Switching firewall to iptables..."
-systemctl disable --now firewalld 2>/dev/null || true
-systemctl mask firewalld 2>/dev/null || true
-systemctl enable --now iptables
-systemctl enable --now ip6tables
+systemctl enable --now firewalld
+firewall-cmd --permanent --add-service=ssh >/dev/null
+firewall-cmd --reload >/dev/null
 
 # SELinux configuration and hardening
 echo "Hardening SELinux..."
@@ -58,14 +56,14 @@ sed -i 's/^SELINUX=.*/SELINUX=enforcing/' /etc/selinux/config
 sed -i 's/^SELINUXTYPE=.*/SELINUXTYPE=targeted/' /etc/selinux/config
 
 # Restore contexts
-restorecon -RFv /etc /usr /bin /sbin /var >/dev/null 2>&1 || true
+restorecon -Rv /etc/ssh /etc/passwd /etc/shadow /usr/bin /bin /sbin >/dev/null 2>&1 || true
 
 # Harden common daemon behavior
-setsebool -P ssh_sysadm_login off
-setsebool -P daemons_enable_cluster_mode off
-setsebool -P daemons_dump_core off
-setsebool -P domain_kernel_load_modules off
-setsebool -P secure_mode_policyload on
+setsebool -P ssh_sysadm_login off || true
+setsebool -P daemons_enable_cluster_mode off || true
+setsebool -P daemons_dump_core off || true
+setsebool -P domain_kernel_load_modules off || true
+setsebool -P secure_mode_policyload on || true
 
 # Set up Fail2Ban on the system
 echo "Configuring fail2ban..."
@@ -85,20 +83,20 @@ systemctl enable --now fail2ban
 echo "Hardening SSH..."
 SSHD=/etc/ssh/sshd_config
 
-sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' $SSHD
-sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' $SSHD
-sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication no/' $SSHD
-sed -i 's|^#*AuthorizedKeysFile.*|AuthorizedKeysFile none|' $SSHD
-sed -i 's/^#*X11Forwarding.*/X11Forwarding no/' $SSHD
-sed -i 's/^#*MaxAuthTries.*/MaxAuthTries 3/' $SSHD
+sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' "$SSHD"
+sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' "$SSHD"
+sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication no/' "$SSHD"
+sed -i 's/^#*AuthorizedKeysFile.*/AuthorizedKeysFile none/' "$SSHD"
+sed -i 's/^#*X11Forwarding.*/X11Forwarding no/' "$SSHD"
+sed -i 's/^#*MaxAuthTries.*/MaxAuthTries 3/' "$SSHD"
 
-systemctl restart sshd
+sshd -t && systemctl restart sshd
 
 # Password rotation for all users barring the exception
 echo "Rotating passwords..."
 CURRENT_USER=$(logname 2>/dev/null || whoami)
 
-awk -F: '$3 >= 1000 {print $1}' /etc/passwd | while read -r user; do
+awk -F: '$3 >= 1000 && $1 != "nobody" {print $1}' /etc/passwd | while read -r user; do
   if [[ "$user" == "root" ]] || \
      [[ "$user" == "$CURRENT_USER" ]] || \
      [[ "$user" == "$IGNORE_USER" ]]; then
@@ -115,17 +113,17 @@ done
 
 # Backup important directories locally
 echo "Creating backup directory..."
-BACKUP_DIR="~/.mongosux/backups"
+BACKUP_DIR="$HOME/.mongosux/backups"
 mkdir -p "$BACKUP_DIR"
 
 echo "Backing up /etc..."
-rsync -avz /etc "$BACKUP_DIR/"
+rsync -a /etc "$BACKUP_DIR/"
 
 echo "Backing up /bin..."
-rsync -avz /bin "$BACKUP_DIR/"
+rsync -a /bin "$BACKUP_DIR/"
 
 echo "Backing up /sbin..."
-rsync -avz /sbin "$BACKUP_DIR/"
+rsync -a /sbin "$BACKUP_DIR/"
 
 echo "Hardening complete."
 sestatus || true

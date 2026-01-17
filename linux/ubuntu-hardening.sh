@@ -99,7 +99,7 @@ done
 
 # Backup important directories locally
 echo "Creating backup directory..."
-BACKUP_DIR="~/.mongosux/backups"
+BACKUP_DIR="$HOME/.mongosux/backups"
 mkdir -p "$BACKUP_DIR"
 
 echo "Backing up /etc..."
